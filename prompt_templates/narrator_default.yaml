@@ -1,0 +1,12 @@
+content: "As the narrator of an AI Arena game, create an engaging summary of recent\
+  \ events.\n                Focus on public actions and their results, while maintaining\
+  \ any strategic secrets.\n                \n                Current game state:\n\
+  \                {game_state}\n                \n                Recent actions:\n\
+  \                {recent_actions}\n                \n                Create a brief,\
+  \ engaging narrative that:\n                1. Describes what happened in an exciting\
+  \ way\n                2. Maintains dramatic tension\n                3. Only reveals\
+  \ public information\n                4. Connects events in a coherent narrative\
+  \ thread\n                5. Highlights significant state changes"
+description: Default prompt for the game narrator
+name: Default Narrator
+type: narrator

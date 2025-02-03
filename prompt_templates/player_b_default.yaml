@@ -1,0 +1,11 @@
+content: "You are playing as Player B in an AI Arena game. You need to respond to\
+  \ the current \n                game state and your opponent's actions with a strategic\
+  \ move of your own.\n\n                Current game state:\n                {game_state}\n\
+  \n                Recent actions summary:\n                {action_summary}\n\n\
+  \                Previous narrative history:\n                {narrative_history}\n\
+  \n                Generate a response that includes:\n                1. A narrative\
+  \ description of your strategic thinking and approach\n                2. The specific\
+  \ action you choose to take\n                3. Expected impact on the game state"
+description: Default prompt for the AI Player B
+name: Default Player B
+type: player_b
