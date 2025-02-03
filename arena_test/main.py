@@ -8,6 +8,10 @@ import asyncio
 import streamlit.components.v1 as components
 import json
 from prompt_manager import PromptManager, Prompt, PromptType
+import streamlit as st
+from db_manager import GameDataManager
+from analysis import render_analysis_ui
+from auth import render_auth_ui
 
 def initialize_session_state():
     if 'game_state' not in st.session_state:
@@ -27,6 +31,15 @@ def initialize_session_state():
         st.session_state.messages = []
     if 'total_turns' not in st.session_state:
         st.session_state.total_turns = 0
+
+    # Create new game session with username if logged in and game_id not set
+    if 'game_id' not in st.session_state:
+        username = st.session_state.get('username')  # Will be None if not logged in
+        game_id = st.session_state.db_manager.create_game_session(
+            st.session_state.game_state.to_dict(),
+            username  # This will be None if user isn't logged in
+        )
+        st.session_state.game_id = game_id
 
 def initialize_prompt_manager():
     if 'prompt_manager' not in st.session_state:
@@ -143,6 +156,34 @@ async def process_player_a_turn(message: str, game_state: GameState, game_master
         player=PlayerType.A,
         narrative=narrative
     )
+
+    # Save turn data
+    turn_data = {
+        'game_state': game_state.to_dict(),
+        'conversation': {
+            'player_message': message,
+            'gm_response': response
+        },
+        'actions': updates
+    }
+    st.session_state.db_manager.save_turn_data(
+        st.session_state.game_id, 
+        turn_data
+    )
+    
+    # Save LLM parameters for Player A
+    st.session_state.db_manager.save_conversation(
+        st.session_state.game_id,
+        game_state.turn_number,
+        st.session_state.messages,
+        {
+            'model': 'claude-3-sonnet-20240229',
+            'prompts': {
+                prompt_type.value: name  # Convert enum to string
+                for prompt_type, name in st.session_state.selected_prompts.items()
+            }
+        }
+    )
     
     return narrative
 
@@ -156,6 +197,39 @@ async def process_player_b_turn(game_state: GameState, player_b: PlayerBAgent):
         str(recent_actions)
     )
     
+    # Save Player B's turn data
+    turn_data = {
+        'game_state': game_state.to_dict(),
+        'conversation': {
+            'player': 'B',
+            'message': 'AI Generated Turn',
+            'narrative': narrative,
+            'updates': updates
+        },
+        'actions': updates
+    }
+    st.session_state.db_manager.save_turn_data(
+        st.session_state.game_id, 
+        turn_data
+    )
+    
+    # Save LLM parameters for Player B
+    st.session_state.db_manager.save_conversation(
+        st.session_state.game_id,
+        game_state.turn_number,
+        [{
+            'role': 'assistant',
+            'content': narrative,
+            'player': 'B'
+        }],
+        {
+            'model': 'claude-3-sonnet-20240229',
+            'prompts': {
+                PromptType.PLAYER_B.value: st.session_state.selected_prompts[PromptType.PLAYER_B]
+            }
+        }
+    )
+
     # Update game state
     game_state.update_state(
         updates=updates,
@@ -172,6 +246,23 @@ async def update_narrative_summary(game_state: GameState, narrator: GameNarrator
         recent_actions,
         game_state.to_dict()
     )
+    
+    # Save narrator's summary
+    st.session_state.db_manager.save_conversation(
+        st.session_state.game_id,
+        game_state.turn_number,
+        [{
+            'role': 'narrator',
+            'content': summary
+        }],
+        {
+            'model': 'claude-3-sonnet-20240229',
+            'prompts': {
+                PromptType.NARRATOR.value: st.session_state.selected_prompts[PromptType.NARRATOR]
+                }
+        }
+    )
+    
     game_state.public_narrative.append(summary)
     return summary
 
@@ -230,14 +321,51 @@ def create_grid_display(game_state):
     components.html(grid_html, height=500)
 
 def check_game_end(game_state: GameState) -> bool:
-    if game_state.player_a.hp <= 0 or game_state.player_b.hp <= 0:
-        return True
-    if st.session_state.total_turns >= 3:
+    """Returns True if game has ended, saves final state to database"""
+    game_over = False
+    winner = None
+    
+    if game_state.player_a.hp <= 0:
+        game_over = True
+        winner = "Player B"
+    elif game_state.player_b.hp <= 0:
+        game_over = True
+        winner = "Player A"
+    elif st.session_state.total_turns >= 3:
+        game_over = True
+        # Determine winner based on remaining HP if turns are maxed
+        if game_state.player_a.hp > game_state.player_b.hp:
+            winner = "Player A"
+        elif game_state.player_b.hp > game_state.player_a.hp:
+            winner = "Player B"
+        else:
+            winner = "Draw"
+
+    if game_over:
+        # Save final game state and winner
+        st.session_state.db_manager.end_game(
+            st.session_state.game_id,
+            winner,
+            game_state.to_dict()
+        )
         return True
     return False
 
 def render_game_ui():
-    st.title("AI Arena Prototype")
+
+    # Initialize db_manager first
+    if 'db_manager' not in st.session_state:
+        try:
+            st.session_state.db_manager = GameDataManager()
+        except ValueError as e:
+            st.error(f"Database connection error: {e}")
+            st.stop()
+
+    # Check authentication
+    if not render_auth_ui():
+        return
+    
+    st.title(f"AI Arena - Welcome, {st.session_state.username}!")
     initialize_session_state()
     initialize_prompt_manager()
     
@@ -323,5 +451,13 @@ def render_game_ui():
                 st.session_state.total_turns += 1
                 st.rerun()
 
+# if __name__ == "__main__":
+#     render_game_ui()
+
 if __name__ == "__main__":
-    render_game_ui()
+    pages = {
+        "Game": render_game_ui,
+        "Analysis": render_analysis_ui
+    }
+    page = st.sidebar.selectbox("Choose a page", list(pages.keys()))
+    pages[page]()
